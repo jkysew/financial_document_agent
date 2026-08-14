@@ -1,0 +1,37 @@
+name: Local Ollama Config
+version: 1.0.0
+schema: v1
+models:
+  - name: Qwen3.6
+    provider: ollama
+    model: qwen3.6:latest
+    apiBase: http://localhost:11434
+    roles:
+      - chat
+  - name: Qwen3-Coder
+    provider: ollama
+    model: qwen3-coder:latest
+    apiBase: http://localhost:11434
+    roles:
+      - chat
+      - edit
+      - apply
+  - name: Gemma4-Coder
+    provider: ollama
+    model: qwen3-coder:latest
+    apiBase: http://localhost:11434
+    roles:
+      - chat
+      - edit
+      - apply      
+  - name: gemma4
+    provider: ollama
+    model: gemma4-agent:latest
+    apiBase: http://localhost:11434
+    roles:
+      - chat
+      - edit
+      - apply      
+  - name: Autodetect
+    provider: ollama
+    model: AUTODETECT

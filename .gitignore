@@ -1,0 +1,4 @@
+.continue/
+__pycache__/
+*.pyc
+data/
