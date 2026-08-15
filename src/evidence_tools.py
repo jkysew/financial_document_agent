@@ -1,5 +1,5 @@
 """
-Evidence tools for Financial Document Agent v3 - Actual PDF Implementation
+Evidence tools for Financial Document Agent v4 - Actual PDF Implementation
 """
 
 import fitz  # PyMuPDF
