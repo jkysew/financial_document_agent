@@ -140,6 +140,48 @@ class PDFEvidenceRetriever:
         if current_row_words:
             rows.append(self._create_physical_row_from_words(current_row_words, page_number))
         
+        # Associate visual spans with physical rows
+        visual_spans = self._extract_visual_spans(page)
+        used_spans = set()
+        
+        for row in rows:
+            best_span_idx = None
+            best_proximity = float("inf")
+            
+            for i, span in enumerate(visual_spans):
+                if i in used_spans:
+                    continue
+                
+                span_y0 = span.bbox["y0"]
+                span_y1 = span.bbox["y1"]
+                row_y1 = row.coordinates["y1"]
+                row_y2 = row.coordinates["y2"]
+                
+                # Calculate vertical overlap between span and row bounding boxes
+                overlap_top = max(span_y0, row_y1)
+                overlap_bottom = min(span_y1, row_y2)
+                overlap = overlap_bottom - overlap_top
+                
+                if overlap > 0:
+                    best_span_idx = i
+                    best_proximity = 0
+                    break
+                
+                # If no overlap, calculate proximity
+                if span_y1 < row_y1:
+                    proximity = row_y1 - span_y1
+                else:
+                    proximity = span_y0 - row_y2
+                
+                if best_proximity > proximity:
+                    best_proximity = proximity
+                    best_span_idx = i
+            
+            if best_span_idx is not None and best_proximity <= y_tolerance:
+                row.visual_spans.append(visual_spans[best_span_idx])
+                used_spans.add(best_span_idx)
+
+        
         return rows
         
     def _create_physical_row_from_words(self, words: List, page_number: int) -> PhysicalRow:
