@@ -142,16 +142,15 @@ class PDFEvidenceRetriever:
         
         # Associate visual spans with physical rows
         visual_spans = self._extract_visual_spans(page)
-        used_spans = set()
         
-        for row in rows:
-            best_span_idx = None
+        for span in visual_spans:
+            if span.text.strip() == "":
+                continue
+            
+            best_row_idx = None
             best_proximity = float("inf")
             
-            for i, span in enumerate(visual_spans):
-                if i in used_spans:
-                    continue
-                
+            for i, row in enumerate(rows):
                 span_y0 = span.bbox["y0"]
                 span_y1 = span.bbox["y1"]
                 row_y1 = row.coordinates["y1"]
@@ -163,9 +162,13 @@ class PDFEvidenceRetriever:
                 overlap = overlap_bottom - overlap_top
                 
                 if overlap > 0:
-                    best_span_idx = i
-                    best_proximity = 0
-                    break
+                    row_idx_to_use = i
+                    proximity = 0
+                    
+                    if best_row_idx is None or best_proximity > proximity:
+                        best_row_idx = row_idx_to_use
+                        best_proximity = proximity
+                    continue
                 
                 # If no overlap, calculate proximity
                 if span_y1 < row_y1:
@@ -173,14 +176,12 @@ class PDFEvidenceRetriever:
                 else:
                     proximity = span_y0 - row_y2
                 
-                if best_proximity > proximity:
+                if best_row_idx is None or best_proximity > proximity:
+                    best_row_idx = i
                     best_proximity = proximity
-                    best_span_idx = i
             
-            if best_span_idx is not None and best_proximity <= y_tolerance:
-                row.visual_spans.append(visual_spans[best_span_idx])
-                used_spans.add(best_span_idx)
-
+            if best_row_idx is not None and best_proximity <= y_tolerance:
+                rows[best_row_idx].visual_spans.append(span)
         
         return rows
         
