@@ -4,7 +4,7 @@ Evidence tools for Financial Document Agent v4 - Actual PDF Implementation
 
 import fitz  # PyMuPDF
 from typing import List, Dict, Optional, Tuple
-from src.models import PhysicalRow, EvidenceSource, LogicalDocumentBlock
+from src.models import PhysicalRow, EvidenceSource, LogicalDocumentBlock, VisualSpan
 from dataclasses import dataclass
 
 
@@ -174,6 +174,43 @@ class PDFEvidenceRetriever:
             text=text,
             words=word_objects
         )
+
+    def _extract_visual_spans(self, page) -> List[VisualSpan]:
+        """Extract visual spans from a PDF page.
+
+        Args:
+            page: A PyMuPDF Page object.
+
+        Returns:
+            List[VisualSpan]: List of visual spans extracted from the page.
+        """
+        spans_list = []
+        text_dict = page.get_text("dict")
+
+        for block in text_dict["blocks"]:
+            if "lines" not in block:
+                continue
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    text = span["text"]
+                    if not text:
+                        continue
+                    bbox = {
+                        "x0": span["bbox"][0],
+                        "y0": span["bbox"][1],
+                        "x1": span["bbox"][2],
+                        "y1": span["bbox"][3],
+                    }
+                    spans_list.append(VisualSpan(
+                        text=text,
+                        font_family=span["font"],
+                        font_size=span["size"],
+                        font_flags=int(span["flags"]),
+                        color=span["color"],
+                        bbox=bbox,
+                    ))
+
+        return spans_list
     
     def search_text(self, query: str) -> List[Tuple[int, str]]:
         """
