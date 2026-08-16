@@ -188,6 +188,22 @@ Do not attempt increasingly large or complex replacement operations when previou
 
 If necessary, make smaller, independently verifiable edits.
 
+## Windows UTF-8 Rule
+
+All project JSON and text files are UTF-8.
+
+When reading JSON/text files, always specify:
+`encoding="utf-8"`
+
+When writing JSON/text files, always specify:
+`encoding="utf-8"`
+
+For scripts that print PDF-derived text on Windows, initialize stdout with:
+```python
+import sys
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+```
+
 ### Completion Requirement
 
 A code-change task is not complete until:
