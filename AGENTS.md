@@ -41,7 +41,46 @@ Windows 11
 D:\John\financial_document_agent_v4
 ```
 
+### Source Location
+
+```text
+D:\John\financial_document_agent_v4\src
+```
+
+### PDF Location & Name
+
+```text
+D:\John\financial_document_agent_v4\documents\ing_luxembourg.pdf
+```
 ---
+
+## Architecture Context
+
+Before beginning any task involving document extraction, PhysicalRows, VisualSpans, BoundaryEvidence, logical grouping, semantic interpretation, or evidence provenance, read:
+
+```text
+ARCHITECTURE.md
+```
+
+ARCHITECTURE.md contains the authoritative system architecture, validated implementation state, current development status, and important project invariants.
+
+Treat the validated implementation state in ARCHITECTURE.md as established project context.
+
+Do not recreate or rediscover information that is already documented there unless the task specifically requires verification.
+
+In particular, do not recreate:
+
+- the validated PhysicalRow extraction pipeline
+- `data/visual_span_inspection.json`
+- the live-vs-JSON consistency validation
+- `data/authoritative_boundary_ground_truth.json`
+
+When starting a new task, use this order:
+
+1. Read `AGENTS.md`.
+2. Read the relevant portions of `ARCHITECTURE.md`.
+3. Inspect only the source files required for the specific task.
+4. Make the smallest required change.
 
 ## Agent Operating Rules
 
