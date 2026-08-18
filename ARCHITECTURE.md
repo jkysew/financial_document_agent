@@ -1417,6 +1417,20 @@ Only add implementation details to this section after they have been verified.
 
 ---
 
+## 47. Empirical Boundary Evidence Findings
+
+Geometry and typography alone are insufficient to determine all JOIN/SPLIT/AMBIGUOUS boundaries.
+
+The 12 frozen boundary cases include visually similar cases with different structural outcomes.
+
+Candidate text-structure evidence such as numeric-token count, currency/amount presence, and table/separator patterns provides useful contextual observations.
+
+These text features do not independently determine JOIN/SPLIT/AMBIGUOUS.
+
+Text-structure features must remain observational evidence and must not become hard-coded boundary rules without further validation.
+
+B11 and B12 are particularly important because their visual evidence is highly similar while their ground-truth outcomes differ (SPLIT vs AMBIGUOUS).
+
 # Appendix A — Supplied Prototype Files
 
 The initial prototype consists of:
