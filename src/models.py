@@ -57,7 +57,7 @@ class EvidenceSource:
     content: str  # Raw content (text or image data)
     context: str  # Surrounding text context
     evidence_id: str = None
-    
+
     def __post_init__(self):
         if self.evidence_id is None:
             self.evidence_id = str(uuid.uuid4())
@@ -89,9 +89,9 @@ class FeeCandidate:
         if self.source_coordinates is None:
             self.source_coordinates = {}
         if self.candidate_id is None:
-            self.candidate_id = str(uuid.uuid4())   
+            self.candidate_id = str(uuid.uuid4())
 
-    
+
 @dataclass
 class LogicalDocumentBlock:
     """Logical unit that may contain multiple physical rows and fee candidates"""
@@ -107,7 +107,7 @@ class LogicalDocumentBlock:
     ambiguities: List[str] = None
     confidence_score: float = 0.0
     interpretation_notes: List[str] = None
-    
+
     def __post_init__(self):
         if self.ambiguities is None:
             self.ambiguities = []
@@ -121,3 +121,34 @@ class LogicalDocumentBlock:
             self.physical_rows = []
         # Fixed mutable defaults for references and constraints in FeeCandidate
         # This is already handled in FeeCandidate's __post_init__
+
+@dataclass
+class BoundaryEvidence:
+    """Deterministic evidence describing an adjacent PhysicalRow boundary."""
+
+    page_number: int
+    row_a_index: int
+    row_b_index: int
+    row_a_text: str
+    row_b_text: str
+
+    raw_vertical_gap: float
+    horizontal_overlap: float
+    left_margin_delta: float
+    left_margin_similarity: float
+
+    font_size_difference: float
+    font_size_similarity: float
+    font_family_similarity: float
+    bold_relationship: str
+
+    visual_span_count_a: int
+    visual_span_count_b: int
+    visual_span_composition_a: Dict[str, Any]
+    visual_span_composition_b: Dict[str, Any]
+
+    page_median_gap: float
+    robust_gap_spread: float
+    local_gap_ratio: float
+
+    neighborhood_evidence: Dict[str, Any]
