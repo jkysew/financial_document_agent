@@ -1431,6 +1431,57 @@ Text-structure features must remain observational evidence and must not become h
 
 B11 and B12 are particularly important because their visual evidence is highly similar while their ground-truth outcomes differ (SPLIT vs AMBIGUOUS).
 
+## 48. Structural Boundary Decision Layer
+
+`BoundaryEvidence` is an observation layer. It records deterministic geometric, typographic, VisualSpan, and neighborhood evidence about an adjacent `PhysicalRow` boundary. It must not determine whether the rows should be joined or split.
+
+The next architectural component is `BoundaryDecisionEngine`.
+
+Its responsibility is to interpret an existing `BoundaryEvidence` record and produce one of:
+
+- `JOIN`
+- `SPLIT`
+- `AMBIGUOUS`
+
+The decision result must remain traceable to the underlying `BoundaryEvidence`.
+
+The decision result should preserve:
+
+- evidence supporting JOIN
+- evidence supporting SPLIT
+- conflicting evidence
+- unresolved or insufficient evidence
+- a human-readable reason for the decision
+
+The initial decision layer must not use a single feature as authoritative. In particular:
+
+- a large vertical gap does not imply SPLIT;
+- a large margin shift does not imply SPLIT;
+- typography changes do not imply SPLIT;
+- matching typography does not imply JOIN.
+
+The frozen boundary cases demonstrate these constraints. B5 and B9 are JOIN cases despite relatively large gaps. B6 is a JOIN case despite a large margin shift. B10 is a JOIN case despite typography changes. B11 and B12 have highly similar visual evidence but different ground-truth outcomes, demonstrating that evidence insufficiency and conflicting evidence must remain representable.
+
+The initial design must not introduce weighted voting, arbitrary numeric decision thresholds, or document-specific rules. These may only be considered after empirical validation against the frozen acceptance cases.
+
+`AMBIGUOUS` is a valid structural result when deterministic evidence is insufficient or materially conflicting.
+
+A future semantic or LLM resolver may be introduced downstream of `BoundaryDecisionEngine` for unresolved `AMBIGUOUS` cases. Such a resolver must not modify the evidence layer or replace the deterministic provenance chain.
+
+The intended flow is:
+
+    PhysicalRow
+        ↓
+    BoundaryEvidenceProvider
+        ↓
+    BoundaryEvidence
+        ↓
+    BoundaryDecisionEngine
+        ↓
+    JOIN / SPLIT / AMBIGUOUS
+        ↓
+    optional semantic/LLM resolution for unresolved cases
+    
 # Appendix A — Supplied Prototype Files
 
 The initial prototype consists of:
