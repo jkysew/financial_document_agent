@@ -512,7 +512,6 @@ class FeeSectionAssembler:
             "minimum of",
             "maximum of",
             "plus ",
-            "additional ",
         )
 
         return lower.startswith(continuation_prefixes)
