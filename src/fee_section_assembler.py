@@ -56,6 +56,9 @@ class FeeSectionAssembler:
         continuation row
 
     becomes one FeeItem with continuation_text.
+
+    Numbered footnotes are treated as explanatory material rather than
+    fee items. A footnote may span multiple physical rows.
     """
 
     CURRENCY_MARKERS = ("€", "$", "£", "EUR", "USD", "GBP", "CHF")
@@ -80,6 +83,61 @@ class FeeSectionAssembler:
         "tariff brochure",
     )
 
+    # Exact structural headings observed in this tariff.
+    # Matching is against normalized full text, not substrings.
+    HEADING_TEXTS = {
+        "accounts",
+        "current account",
+        "credit card - ing group offer",
+        "account, transaction and fee reporting",
+        "account, transaction and fee reporting electronic reporting",
+        "electronic reporting",
+        "interactive channel (insidebusiness payments, multiline)",
+        "insidebusiness connect (file transfer, ebics, swift)",
+        "third party bank reporting",
+        "additional reporting services",
+        "additional services",
+        "paper reporting",
+        "transfers - outgoing",
+        "transfers - incoming",
+        "without foreign exchange transaction",
+        "electronic transfers",
+        "additional charges",
+        "single credit transfers and direct debits",
+        "direct debit",
+        "sepa direct debit",
+        "sepa direct debit as creditor",
+        "sepa direct debit as debtor",
+        "other services",
+        "certificates (excl. vat)",
+        "cash management",
+        "cards",
+        "custody account charges",
+        "custody account charges (excl. vat)",
+        "securities transactions",
+        "payment of coupons & repayment of securities",
+        "cut-off times",
+        "cut-off times - value dating - other information",
+        "currency conversion",
+        "general principle",
+        "definitions",
+        "complaint procedure",
+        "complaint procedure lodge a complaint against ing luxembourg s.a.",
+        "additional services and fees",
+        "debit interest rate",
+        "debit interest rates for current accounts without arranged overdrafts (per annum)",
+        "credit interest rate",
+        "pledge agreements (by third parties)",
+        "ing purchase control",
+        "ing corporate card offer",
+        "card offer",
+    }
+
+    HEADING_MARKERS = (
+        "(per annum)",
+        "(excl. vat)",
+    )
+
     def assemble(
         self,
         blocks: List[LogicalDocumentBlock],
@@ -97,10 +155,23 @@ class FeeSectionAssembler:
         current_section: Optional[FeeSection] = None
         current_fee_item: Optional[FeeItem] = None
 
+        current_footnote_number: Optional[str] = None
+        current_page: Optional[int] = None
+
         for block in blocks:
+            block_page = block.page_number
+
+            if current_page is None:
+                current_page = block_page
+            elif block_page != current_page:
+                current_page = block_page
+                current_footnote_number = None
+
             block_text = self._normalize_text(block.text_content)
 
             if not block_text or self._is_footer(block_text):
+                current_footnote_number = None
+                current_fee_item = None
                 continue
 
             physical_rows = getattr(block, "physical_rows", None) or []
@@ -113,34 +184,50 @@ class FeeSectionAssembler:
                         continue
 
                     if self._is_footer(row_text):
-                        continue
-
-                    if self._is_footnote(row_text):
+                        current_footnote_number = None
                         current_fee_item = None
                         continue
 
-                    # Explicit pricing-condition continuation takes priority.
+                    # A numbered footnote starts a non-fee explanatory region.
+                    footnote_number = self._extract_footnote_number(row_text)
+                    if footnote_number is not None:
+                        current_footnote_number = footnote_number
+                        current_fee_item = None
+                        continue
+
+                    # Consume continuation lines belonging to a footnote.
+                    if current_footnote_number is not None:
+                        if self._looks_like_section_heading(row_text):
+                            current_footnote_number = None
+                        else:
+                            continue
+
+                    # Explicit pricing-condition continuation.
                     if self._is_continuation_row(row_text):
                         if current_fee_item is not None:
-                            current_fee_item.continuation_text.append(row_text)
-                            current_fee_item.source_text += " " + row_text
+                            self._append_continuation(
+                                current_fee_item,
+                                row_text,
+                            )
                         continue
 
                     # A row with its own fee always takes priority over
-                    # heading detection. This prevents rows such as
-                    # "Opening a current account € 500" from being mistaken
-                    # for a heading merely because they contain "current account".
+                    # heading detection.
                     fee_info = self._extract_fee_info(row_text)
 
                     if fee_info is not None:
                         description, fee_text, occurrence_text = fee_info
 
                         if current_section is None:
-                            current_section = FeeSection(heading=None)
+                            current_section = FeeSection(
+                                heading=None
+                            )
                             sections.append(current_section)
 
                         if block.block_id not in current_section.source_blocks:
-                            current_section.source_blocks.append(block.block_id)
+                            current_section.source_blocks.append(
+                                block.block_id
+                            )
 
                         current_fee_item = FeeItem(
                             description=description,
@@ -153,7 +240,7 @@ class FeeSectionAssembler:
                         current_section.fee_items.append(current_fee_item)
                         continue
 
-                    # Only non-fee rows can become section/category headings.
+                    # Only explicit/validated headings become sections here.
                     if self._looks_like_section_heading(row_text):
                         current_section = FeeSection(
                             heading=row_text,
@@ -163,13 +250,28 @@ class FeeSectionAssembler:
                         current_fee_item = None
                         continue
 
-                    # Unknown non-fee content is not assumed to be a
-                    # continuation.
+                    # Do not guess that arbitrary non-fee text is a
+                    # continuation. Leave it outside the current fee item.
                     current_fee_item = None
 
                 continue
 
-            # Fallback for blocks without physical rows.
+            # ----------------------------------------------------------------
+            # Fallback for blocks without physical-row detail.
+            # ----------------------------------------------------------------
+
+            footnote_number = self._extract_footnote_number(block_text)
+            if footnote_number is not None:
+                current_footnote_number = footnote_number
+                current_fee_item = None
+                continue
+
+            if current_footnote_number is not None:
+                if self._looks_like_section_heading(block_text):
+                    current_footnote_number = None
+                else:
+                    continue
+
             fee_info = self._extract_fee_info(block_text)
 
             if fee_info is not None:
@@ -180,7 +282,9 @@ class FeeSectionAssembler:
                     sections.append(current_section)
 
                 if block.block_id not in current_section.source_blocks:
-                    current_section.source_blocks.append(block.block_id)
+                    current_section.source_blocks.append(
+                        block.block_id
+                    )
 
                 current_fee_item = FeeItem(
                     description=description,
@@ -202,8 +306,6 @@ class FeeSectionAssembler:
                 current_fee_item = None
                 continue
 
-            # Generic fallback heading logic for blocks without physical-row
-            # detail.
             if self._looks_like_heading(block_text):
                 current_section = FeeSection(
                     heading=block_text,
@@ -239,7 +341,9 @@ class FeeSectionAssembler:
             marker.lower() in lower
             for marker in self.CURRENCY_MARKERS
         )
+
         has_percent = "%" in text
+
         has_fee_marker = any(
             marker in lower
             for marker in self.FEE_MARKERS
@@ -284,7 +388,10 @@ class FeeSectionAssembler:
 
         return description or text
 
-    def _extract_fee_text(self, text: str) -> Optional[str]:
+    def _extract_fee_text(
+        self,
+        text: str,
+    ) -> Optional[str]:
         """
         Extract a conservative pricing fragment.
 
@@ -354,49 +461,17 @@ class FeeSectionAssembler:
         self,
         text: str,
     ) -> bool:
-        """Recognize obvious section/category headings in this tariff."""
-        lower = text.lower().strip()
+        """
+        Recognize an explicit structural heading.
 
-        if not lower:
+        Matching is against the complete normalized text.
+        """
+        normalized = self._normalize_heading_text(text)
+
+        if not normalized:
             return False
 
-        if self._is_footer(text):
-            return False
-
-        heading_phrases = (
-            "accounts",
-            "current account",
-            "credit card - ing group offer",
-            "account, transaction and fee reporting",
-            "electronic reporting",
-            "interactive channel",
-            "insidebusiness connect",
-            "third party bank reporting",
-            "additional reporting services",
-            "additional services",
-            "paper reporting",
-            "transfers - outgoing",
-            "transfers - incoming",
-            "additional charges",
-            "direct debit",
-            "sepa direct debit",
-            "other services",
-            "certificates",
-            "cash management",
-            "cards",
-            "custody account charges",
-            "securities transactions",
-            "payment of coupons & repayment of securities",
-            "cut-off times",
-            "currency conversion",
-            "definitions",
-            "complaint procedure",
-        )
-
-        return any(
-            phrase in lower
-            for phrase in heading_phrases
-        )
+        return normalized in self.HEADING_TEXTS
 
     def _looks_like_heading(
         self,
@@ -413,21 +488,20 @@ class FeeSectionAssembler:
 
         lower = text.lower()
 
-        heading_markers = (
-            "(per annum)",
-            "(excl. vat)",
-        )
-
         return any(
             marker in lower
-            for marker in heading_markers
+            for marker in self.HEADING_MARKERS
         )
 
     def _is_continuation_row(
         self,
         text: str,
     ) -> bool:
-        """Identify obvious pricing-condition continuations."""
+        """
+        Identify clear continuation/condition rows.
+
+        These are deterministic and deliberately narrow.
+        """
         lower = text.lower().strip()
 
         continuation_prefixes = (
@@ -437,21 +511,43 @@ class FeeSectionAssembler:
             "max.",
             "minimum of",
             "maximum of",
+            "plus ",
+            "additional ",
         )
 
         return lower.startswith(continuation_prefixes)
 
-    def _is_footnote(
+    def _extract_footnote_number(
         self,
         text: str,
-    ) -> bool:
-        """Recognize obvious numbered footnote rows."""
-        stripped = text.strip()
+    ) -> Optional[str]:
+        """
+        Return a leading footnote number.
 
-        if not stripped:
-            return False
+        Examples:
+            '1 Trust, Offshore, Foundation...'
+            '4 The paper payment service...'
+            '10 The exchange commission...'
+        """
+        match = re.match(
+            r"^(\d+)\s+",
+            text.strip(),
+        )
 
-        return bool(re.match(r"^\d+\s+", stripped))
+        if match:
+            return match.group(1)
+
+        return None
+
+    @staticmethod
+    def _append_continuation(
+        fee_item: FeeItem,
+        text: str,
+    ) -> None:
+        fee_item.continuation_text.append(text)
+        fee_item.source_text = (
+            f"{fee_item.source_text} {text}"
+        ).strip()
 
     @staticmethod
     def _is_footer(
@@ -460,7 +556,35 @@ class FeeSectionAssembler:
         return text.lower().startswith("tariff brochure")
 
     @staticmethod
+    def _normalize_heading_text(
+        text: str,
+    ) -> str:
+        """
+        Normalize heading text for exact comparison.
+
+        Removes trailing footnote markers attached directly to headings,
+        e.g. 'Transfers - Outgoing4' -> 'Transfers - outgoing'.
+        """
+        normalized = re.sub(
+            r"\s+",
+            " ",
+            text,
+        ).strip().lower()
+
+        normalized = re.sub(
+            r"\d+$",
+            "",
+            normalized,
+        ).strip()
+
+        return normalized
+
+    @staticmethod
     def _normalize_text(
         text: str,
     ) -> str:
-        return re.sub(r"\s+", " ", text).strip()
+        return re.sub(
+            r"\s+",
+            " ",
+            text,
+        ).strip()
