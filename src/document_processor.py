@@ -2,12 +2,14 @@
 Main document processor for Financial Document Agent v3
 """
 
-from typing import List, Dict, Any
-from src.models import LogicalDocumentBlock, PhysicalRow
+from typing import List, Dict, Any, Tuple
+from src.models import BoundaryEvidence, LogicalDocumentBlock, PhysicalRow
 from src.evidence_manager import EvidenceManager
 from src.logical_block_generator import LogicalBlockGenerator
 from src.fee_candidate_extractor import FeeCandidateExtractor
 from src.fee_section_assembler import FeeSection, FeeSectionAssembler
+from src.boundary_decision import BoundaryDecision, BoundaryDecisionEngine
+from src.boundary_evidence import BoundaryEvidenceProvider
 from src.evidence_sufficiency_gate import (
     EvidenceSufficiencyDecision,
     EvidenceSufficiencyGate,
@@ -23,6 +25,8 @@ class DocumentProcessor:
         self.block_generator = LogicalBlockGenerator()
         self.extractor = FeeCandidateExtractor()
         self.fee_section_assembler = FeeSectionAssembler()
+        self.boundary_evidence_provider = BoundaryEvidenceProvider()
+        self.boundary_decision_engine = BoundaryDecisionEngine()
         self.evidence_gate = EvidenceSufficiencyGate()
         self.validator = Validator()
     
@@ -45,9 +49,14 @@ class DocumentProcessor:
         fee_sections = self.fee_section_assembler.assemble(
             self.block_generator.get_all_blocks()
         )
+        boundary_evidence, boundary_decisions = self._analyze_boundaries(
+            self.block_generator.get_all_blocks()
+        )
         evidence_decision = self.evidence_gate.evaluate(
             self.block_generator.get_all_blocks(),
             fee_sections,
+            boundary_decisions=boundary_decisions,
+            boundary_evidence=boundary_evidence,
         )
 
         # Step 3: Extract legacy fee candidates
@@ -62,6 +71,8 @@ class DocumentProcessor:
             validated_blocks,
             fee_sections,
             evidence_decision,
+            boundary_evidence,
+            boundary_decisions,
         )
         
         return result
@@ -101,12 +112,62 @@ class DocumentProcessor:
         blocks = self.block_generator.get_all_blocks()
         for block in blocks:
             self.extractor.extract_from_block(block)
+
+    def _analyze_boundaries(
+        self,
+        blocks: List[LogicalDocumentBlock],
+    ) -> Tuple[List[BoundaryEvidence], List[BoundaryDecision]]:
+        """Analyze physical boundaries between adjacent logical blocks."""
+        evidence_records: List[BoundaryEvidence] = []
+        decisions: List[BoundaryDecision] = []
+
+        pages: Dict[int, List[LogicalDocumentBlock]] = {}
+        for block in blocks:
+            pages.setdefault(block.page_number, []).append(block)
+
+        for page_blocks in pages.values():
+            ordered_blocks = sorted(
+                page_blocks,
+                key=lambda block: block.coordinates["y1"],
+            )
+            page_rows = sorted(
+                [
+                    row
+                    for block in ordered_blocks
+                    for row in block.physical_rows
+                ],
+                key=lambda row: row.coordinates["y1"],
+            )
+            row_indexes = {id(row): index for index, row in enumerate(page_rows)}
+
+            for previous_block, next_block in zip(
+                ordered_blocks,
+                ordered_blocks[1:],
+            ):
+                if not previous_block.physical_rows or not next_block.physical_rows:
+                    continue
+
+                last_row = previous_block.physical_rows[-1]
+                boundary_index = row_indexes.get(id(last_row))
+                if boundary_index is None or boundary_index >= len(page_rows) - 1:
+                    continue
+
+                evidence = self.boundary_evidence_provider.get_boundary_evidence(
+                    page_rows,
+                    boundary_index,
+                )
+                evidence_records.append(evidence)
+                decisions.append(self.boundary_decision_engine.decide(evidence))
+
+        return evidence_records, decisions
     
     def _format_output(
         self,
         blocks: List[LogicalDocumentBlock],
         fee_sections: List[FeeSection],
         evidence_decision: EvidenceSufficiencyDecision,
+        boundary_evidence: List[BoundaryEvidence],
+        boundary_decisions: List[BoundaryDecision],
     ) -> Dict[str, Any]:
         """Format the final output"""
         formatted_blocks = []
@@ -169,6 +230,13 @@ class DocumentProcessor:
         return {
             'blocks': formatted_blocks,
             'evidence_sufficiency': evidence_decision.to_dict(),
+            'boundary_analysis': [
+                self._format_boundary_analysis_item(evidence, decision, blocks)
+                for evidence, decision in zip(
+                    boundary_evidence,
+                    boundary_decisions,
+                )
+            ],
             'fee_sections': [
                 {
                     'heading': section.heading,
@@ -197,4 +265,46 @@ class DocumentProcessor:
                     for section in fee_sections
                 ),
             }
+        }
+
+    def _format_boundary_analysis_item(
+        self,
+        evidence: BoundaryEvidence,
+        decision: BoundaryDecision,
+        blocks: List[LogicalDocumentBlock],
+    ) -> Dict[str, Any]:
+        page_rows = [
+            row
+            for block in blocks
+            for row in block.physical_rows
+            if row.page_number == evidence.page_number
+        ]
+        page_rows.sort(key=lambda row: row.coordinates["y1"])
+
+        row_a = page_rows[evidence.row_a_index]
+        row_b = page_rows[evidence.row_b_index]
+
+        return {
+            "decision": decision.decision,
+            "supporting_evidence": decision.supporting_evidence,
+            "conflicting_evidence": decision.conflicting_evidence,
+            "unresolved_evidence": decision.unresolved_evidence,
+            "reason": decision.reason,
+            "page_number": evidence.page_number,
+            "row_a_index": evidence.row_a_index,
+            "row_b_index": evidence.row_b_index,
+            "row_a_id": row_a.row_id,
+            "row_b_id": row_b.row_id,
+            "row_a_text": evidence.row_a_text,
+            "row_b_text": evidence.row_b_text,
+            "row_a_coordinates": row_a.coordinates,
+            "row_b_coordinates": row_b.coordinates,
+            "horizontal_overlap": evidence.horizontal_overlap,
+            "left_margin_similarity": evidence.left_margin_similarity,
+            "font_size_similarity": evidence.font_size_similarity,
+            "font_family_similarity": evidence.font_family_similarity,
+            "bold_relationship": evidence.bold_relationship,
+            "raw_vertical_gap": evidence.raw_vertical_gap,
+            "local_gap_ratio": evidence.local_gap_ratio,
+            "neighborhood_evidence": evidence.neighborhood_evidence,
         }

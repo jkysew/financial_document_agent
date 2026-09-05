@@ -173,6 +173,14 @@ class TestEvidenceSufficiencyGate(unittest.TestCase):
         self.assertEqual(reason.evidence["row_b_index"], 1)
         self.assertEqual(reason.evidence["row_a_text"], rows[0].text)
         self.assertEqual(reason.evidence["row_b_text"], rows[1].text)
+        self.assertEqual(
+            reason.evidence["row_a_coordinates"],
+            rows[0].coordinates,
+        )
+        self.assertEqual(
+            reason.evidence["row_b_coordinates"],
+            rows[1].coordinates,
+        )
 
     def test_conflicting_boundary_evidence_escalates(self):
         rows = [

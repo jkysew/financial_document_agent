@@ -231,6 +231,8 @@ class EvidenceSufficiencyGate:
                 **provenance,
                 "row_a_id": row_a.row_id,
                 "row_b_id": row_b.row_id,
+                "row_a_coordinates": row_a.coordinates,
+                "row_b_coordinates": row_b.coordinates,
             },
         )
 

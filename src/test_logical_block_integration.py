@@ -92,7 +92,24 @@ class TestLogicalBlockIntegration(unittest.TestCase):
 
         self.assertEqual(result["summary"]["total_fee_sections"], 1)
         self.assertEqual(result["summary"]["total_fee_items"], 2)
+        self.assertGreaterEqual(len(result["boundary_analysis"]), 1)
+        boundary = result["boundary_analysis"][0]
+        self.assertIn(boundary["decision"], {"SPLIT", "AMBIGUOUS"})
+        self.assertEqual(boundary["page_number"], 6)
+        self.assertEqual(boundary["row_a_id"], "page6-row-3")
+        self.assertEqual(boundary["row_b_id"], "page6-row-4")
+        self.assertEqual(boundary["row_a_index"], 2)
+        self.assertEqual(boundary["row_b_index"], 3)
+        self.assertEqual(boundary["row_a_coordinates"]["y2"], 40.0)
+        self.assertEqual(boundary["row_b_coordinates"]["y1"], 120.0)
         self.assertEqual(result["evidence_sufficiency"]["decision"], "ESCALATE")
+        self.assertIn(
+            "ambiguous_boundary",
+            {
+                reason["code"]
+                for reason in result["evidence_sufficiency"]["reasons"]
+            },
+        )
         self.assertIn(
             "unresolved_footnote_association",
             {
