@@ -482,6 +482,8 @@ class AgentInvestigationRequest:
     physical_rows: List[PhysicalRowEvidence]
     logical_blocks: List[LogicalBlockEvidence]
     boundary_assessments: List[BoundaryAssessment]
+    target_row_ids: List[str] = field(default_factory=list)
+    target_block_ids: List[str] = field(default_factory=list)
     fee_items: List[Dict[str, Any]] = field(default_factory=list)
     hypotheses: List[InterpretationHypothesis] = field(default_factory=list)
     permitted_evidence_request_types: List[EvidenceRequestType] = field(
@@ -504,6 +506,10 @@ class AgentInvestigationRequest:
                 raise ContractValidationError("Escalation reasons require code and message")
         row_ids = {row.row_id for row in self.physical_rows}
         block_ids = {block.block_id for block in self.logical_blocks}
+        if not set(self.target_row_ids).issubset(row_ids):
+            raise ContractValidationError("Target scope references unknown rows")
+        if not set(self.target_block_ids).issubset(block_ids):
+            raise ContractValidationError("Target scope references unknown blocks")
         for block in self.logical_blocks:
             unknown_rows = set(block.row_ids) - row_ids
             if unknown_rows:
@@ -547,6 +553,8 @@ class AgentInvestigationRequest:
             "boundary_assessments": [
                 boundary.to_dict() for boundary in self.boundary_assessments
             ],
+            "target_row_ids": list(self.target_row_ids),
+            "target_block_ids": list(self.target_block_ids),
             "fee_items": list(self.fee_items),
             "hypotheses": [hypothesis.to_dict() for hypothesis in self.hypotheses],
             "permitted_evidence_request_types": list(
@@ -576,6 +584,8 @@ class AgentInvestigationRequest:
                 BoundaryAssessment.from_dict(boundary)
                 for boundary in data.get("boundary_assessments", [])
             ],
+            target_row_ids=list(data.get("target_row_ids", [])),
+            target_block_ids=list(data.get("target_block_ids", [])),
             fee_items=list(data.get("fee_items", [])),
             hypotheses=[
                 InterpretationHypothesis.from_dict(hypothesis)
