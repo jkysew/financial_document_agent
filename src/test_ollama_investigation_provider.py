@@ -190,8 +190,32 @@ class TestOllamaInvestigationProvider(unittest.TestCase):
         self.assertEqual(calls[0][0], "http://ollama.test/api/chat")
         self.assertEqual(calls[0][1]["model"], "configured-model:latest")
         self.assertFalse(calls[0][1]["stream"])
-        self.assertEqual(calls[0][1]["format"], "json")
+        self.assertEqual(calls[0][1]["format"]["type"], "object")
+        self.assertIn("RESOLVED", calls[0][1]["format"]["properties"]["status"]["enum"])
+        self.assertFalse(calls[0][1]["think"])
+        self.assertEqual(calls[0][1]["options"]["num_predict"], 256)
         self.assertEqual(calls[0][2], 17.5)
+
+    def test_custom_thinking_and_generation_settings_are_sent(self):
+        request = self.make_request()
+        calls = []
+
+        def transport(url, payload, timeout):
+            calls.append(payload)
+            return self.resolved_payload()
+
+        provider = OllamaInvestigationProvider(
+            base_url="http://ollama.test",
+            model_name="configured-model:latest",
+            timeout_seconds=17.5,
+            think=True,
+            num_predict=512,
+            transport=transport,
+        )
+        provider.investigate(request)
+
+        self.assertTrue(calls[0]["think"])
+        self.assertEqual(calls[0]["options"]["num_predict"], 512)
 
     def test_prompt_contains_evidence_and_investigation_rules(self):
         request = self.make_request()
@@ -204,6 +228,18 @@ class TestOllamaInvestigationProvider(unittest.TestCase):
         self.assertIn("not a replacement parser", prompt)
         self.assertIn("Do not invent", prompt)
         self.assertIn("evidence_references", prompt)
+        self.assertIn('"ollama-request-1"', prompt)
+
+    def test_result_schema_restricts_nested_enums_and_request_types(self):
+        schema = OllamaInvestigationProvider.result_schema()
+
+        self.assertEqual(
+            schema["properties"]["status"]["enum"],
+            ["RESOLVED", "UNRESOLVED", "INSUFFICIENT_EVIDENCE"],
+        )
+        request_type = schema["properties"]["follow_up_requests"]["items"]["properties"]["request_type"]
+        self.assertNotIn("clarification", request_type["enum"])
+        self.assertTrue(schema["additionalProperties"] is False)
 
     def test_provider_implements_provider_protocol(self):
         provider = self.make_provider(response=self.resolved_payload())

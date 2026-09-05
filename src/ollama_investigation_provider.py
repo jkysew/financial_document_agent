@@ -33,6 +33,8 @@ class OllamaProviderConfig:
     base_url: str
     model_name: str
     timeout_seconds: float = 120.0
+    think: bool = False
+    num_predict: int = 256
 
     def __post_init__(self) -> None:
         if not self.base_url.strip():
@@ -41,6 +43,8 @@ class OllamaProviderConfig:
             raise ValueError("Ollama model_name is required")
         if self.timeout_seconds <= 0:
             raise ValueError("Ollama timeout_seconds must be positive")
+        if self.num_predict <= 0:
+            raise ValueError("Ollama num_predict must be positive")
 
 
 OllamaTransport = Callable[[str, Dict[str, Any], float], Dict[str, Any]]
@@ -55,12 +59,16 @@ class OllamaInvestigationProvider(AgentInvestigationProvider):
         base_url: str,
         model_name: str,
         timeout_seconds: float = 120.0,
+        think: bool = False,
+        num_predict: int = 256,
         transport: Optional[OllamaTransport] = None,
     ) -> None:
         self.config = OllamaProviderConfig(
             base_url=base_url.rstrip("/"),
             model_name=model_name,
             timeout_seconds=timeout_seconds,
+            think=think,
+            num_predict=num_predict,
         )
         self._transport = transport or self._default_transport
 
@@ -82,7 +90,9 @@ class OllamaInvestigationProvider(AgentInvestigationProvider):
                 },
             ],
             "stream": False,
-            "format": "json",
+            "format": self.result_schema(),
+            "think": self.config.think,
+            "options": {"num_predict": self.config.num_predict},
         }
 
         try:
@@ -159,6 +169,8 @@ Return only one JSON object matching this shape:
   "limitations": []
 }
 
+The request_id must be exactly: """ + json.dumps(request.request_id) + """
+
 For RESOLVED, each conclusion must include evidence_references. Use only
 source IDs, row IDs, block IDs, pages, and coordinates present below.
 
@@ -175,6 +187,157 @@ source IDs, row IDs, block IDs, pages, and coordinates present below.
 === COMPETING INTERPRETATION HYPOTHESES ===
 """ + json.dumps(hypotheses, ensure_ascii=False, indent=2) + """
 """
+
+    @staticmethod
+    def result_schema() -> Dict[str, Any]:
+        """Return the Ollama JSON Schema for AgentInvestigationResult."""
+        evidence_reference = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "source_kind",
+                "source_id",
+                "page_number",
+                "row_ids",
+                "block_ids",
+                "coordinates",
+                "excerpt",
+            ],
+            "properties": {
+                "source_kind": {
+                    "type": "string",
+                    "enum": [
+                        "physical_row",
+                        "visual_span",
+                        "logical_block",
+                        "boundary_assessment",
+                        "fee_item",
+                        "rendered_region",
+                        "search_result",
+                    ],
+                },
+                "source_id": {"type": ["string", "null"]},
+                "page_number": {"type": ["integer", "null"]},
+                "row_ids": {"type": "array", "items": {"type": "string"}},
+                "block_ids": {"type": "array", "items": {"type": "string"}},
+                "coordinates": {"type": ["object", "null"]},
+                "excerpt": {"type": ["string", "null"]},
+            },
+        }
+        hypothesis = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "hypothesis_id",
+                "kind",
+                "summary",
+                "source_row_ids",
+                "source_block_ids",
+                "supporting_evidence",
+                "conflicting_evidence",
+                "status",
+            ],
+            "properties": {
+                "hypothesis_id": {"type": "string"},
+                "kind": {"type": "string"},
+                "summary": {"type": "string"},
+                "source_row_ids": {"type": "array", "items": {"type": "string"}},
+                "source_block_ids": {"type": "array", "items": {"type": "string"}},
+                "supporting_evidence": {"type": "array", "items": {"type": "string"}},
+                "conflicting_evidence": {"type": "array", "items": {"type": "string"}},
+                "status": {"type": "string", "enum": ["candidate", "rejected", "unresolved"]},
+            },
+        }
+        evidence_request = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "request_id",
+                "request_type",
+                "purpose",
+                "page_number",
+                "coordinates",
+                "row_ids",
+                "query",
+                "max_results",
+            ],
+            "properties": {
+                "request_id": {"type": "string"},
+                "request_type": {
+                    "type": "string",
+                    "enum": [
+                        "page_region",
+                        "page_image",
+                        "neighboring_rows",
+                        "adjacent_page",
+                        "text_search",
+                        "repeated_phrase_search",
+                    ],
+                },
+                "purpose": {"type": "string"},
+                "page_number": {"type": ["integer", "null"]},
+                "coordinates": {"type": ["object", "null"]},
+                "row_ids": {"type": "array", "items": {"type": "string"}},
+                "query": {"type": ["string", "null"]},
+                "max_results": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+        }
+        conclusion = {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "conclusion_id",
+                "subject",
+                "fields",
+                "evidence_references",
+                "confidence",
+                "status",
+                "reasoning_summary",
+            ],
+            "properties": {
+                "conclusion_id": {"type": "string"},
+                "subject": {"type": "string"},
+                "fields": {"type": "object"},
+                "evidence_references": {
+                    "type": "array",
+                    "items": evidence_reference,
+                    "minItems": 1,
+                },
+                "confidence": {"type": ["number", "null"]},
+                "status": {"type": "string", "enum": ["resolved", "unresolved"]},
+                "reasoning_summary": {"type": ["string", "null"]},
+            },
+        }
+        return {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "request_id",
+                "status",
+                "conclusions",
+                "alternatives",
+                "unresolved_reason",
+                "missing_or_conflicting_evidence",
+                "follow_up_requests",
+                "limitations",
+            ],
+            "properties": {
+                "request_id": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "enum": ["RESOLVED", "UNRESOLVED", "INSUFFICIENT_EVIDENCE"],
+                },
+                "conclusions": {"type": "array", "items": conclusion},
+                "alternatives": {"type": "array", "items": hypothesis},
+                "unresolved_reason": {"type": ["string", "null"]},
+                "missing_or_conflicting_evidence": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "follow_up_requests": {"type": "array", "items": evidence_request},
+                "limitations": {"type": "array", "items": {"type": "string"}},
+            },
+        }
 
     @staticmethod
     def _system_prompt() -> str:
