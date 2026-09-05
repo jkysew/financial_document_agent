@@ -10,10 +10,10 @@ the current ING tariff PDF.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import re
 
-from src.models import LogicalDocumentBlock
+from src.models import LogicalDocumentBlock, PhysicalRow
 
 
 @dataclass
@@ -26,6 +26,7 @@ class FeeItem:
     fee_text: Optional[str] = None
     occurrence_text: Optional[str] = None
     continuation_text: List[str] = field(default_factory=list)
+    tiers: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -177,6 +178,23 @@ class FeeSectionAssembler:
             physical_rows = getattr(block, "physical_rows", None) or []
 
             if physical_rows:
+                if self._looks_like_tiered_fee_table(
+                    physical_rows,
+                    physical_rows[0],
+                ):
+                    if current_section is None:
+                        current_section = FeeSection(heading=None)
+                        sections.append(current_section)
+
+                    if block.block_id not in current_section.source_blocks:
+                        current_section.source_blocks.append(block.block_id)
+
+                    current_section.fee_items.append(
+                        self._create_tiered_fee_item(block, physical_rows)
+                    )
+                    current_fee_item = None
+                    continue
+
                 for row in physical_rows:
                     row_text = self._normalize_text(row.text)
 
@@ -587,3 +605,123 @@ class FeeSectionAssembler:
             " ",
             text,
         ).strip()
+
+    def _looks_like_tiered_fee_table(
+        self,
+        physical_rows: List[PhysicalRow],
+        current_row: PhysicalRow,
+    ) -> bool:
+        """Detect a block with an explicit tier header and tier rows."""
+        if not physical_rows or not current_row:
+            return False
+
+        header_index = next(
+            (
+                index
+                for index, row in enumerate(physical_rows)
+                if "amount of transfer" in self._normalize_text(row.text).lower()
+                and "euro" in self._normalize_text(row.text).lower()
+            ),
+            None,
+        )
+        if header_index is None or header_index == 0:
+            return False
+
+        tier_rows = physical_rows[header_index + 1:]
+        if len(tier_rows) < 3:
+            return False
+
+        return all(
+            re.search(r"€\s*[\d\s.,]+", self._normalize_text(row.text))
+            and re.match(
+                r"^[<>≤≥]?[\d\s.,]+",
+                self._normalize_text(row.text),
+            )
+            for row in tier_rows
+        )
+
+    def _create_tiered_fee_item(self, block: LogicalDocumentBlock, physical_rows: List[PhysicalRow]) -> FeeItem:
+        """Create a FeeItem with tiers from multiple physical rows."""
+        # This is the correct approach - process all rows in the block as one tiered structure
+        if len(physical_rows) < 3:
+            # Not enough rows for a tiered table, fall back to regular processing
+            return self._create_simple_fee_item(block, physical_rows[0] if physical_rows else None)
+
+        # Find the header row (the one with description about amount)
+        header_row = None
+        tier_rows = []
+        
+        # First find what looks like a header row that contains "amount of transfer"
+        for i, row in enumerate(physical_rows):
+            row_text = self._normalize_text(row.text)
+            if "amount of transfer" in row_text.lower() and "euro" in row_text.lower():
+                header_row = row
+                tier_rows = physical_rows[i+1:]  # Everything after header is a tier row
+                break
+
+        # If no header found, assume first row is description, rest are tiers  
+        if not header_row:
+            header_row = physical_rows[0]
+            tier_rows = physical_rows[1:]
+            
+        description = self._normalize_text(
+            physical_rows[physical_rows.index(header_row) - 1].text
+        )
+        
+        # Process tier rows to extract threshold and fee information
+        tiers = []
+        for row in tier_rows:
+            row_text = self._normalize_text(row.text)
+            if not row_text or self._is_footer(row_text):
+                continue
+                
+            # Extract the fee (currency amount) from the row
+            fee_pattern = r'(€\s*[\d\s.,]+(?:\s*\d+)?)'
+            fee_match = re.search(fee_pattern, row_text, re.IGNORECASE)
+            if not fee_match:
+                continue
+                
+            fee = fee_match.group(1).strip()
+            if len(re.findall(r"\d+", fee)) > 1:
+                fee = re.sub(r"\s+\d$", "", fee)
+            
+            # Extract the threshold part (everything before the fee)
+            threshold_part = row_text[:fee_match.start()].strip()
+            
+            if threshold_part:
+                tiers.append({
+                    "threshold": threshold_part,
+                    "fee": fee
+                })
+
+        # Create the FeeItem with tiers
+        fee_item = FeeItem(
+            description=description,
+            source_blocks=[block.block_id],
+            source_text=" ".join(row.text for row in physical_rows if not self._is_footer(self._normalize_text(row.text))),
+            fee_text=None,  # No direct fee text since it's tiered
+            tiers=tiers
+        )
+        
+        return fee_item
+
+    def _create_simple_fee_item(self, block: LogicalDocumentBlock, row: PhysicalRow) -> FeeItem:
+        """Create a simple FeeItem from a single row for fallback cases."""
+        row_text = self._normalize_text(row.text)
+        fee_info = self._extract_fee_info(row_text)
+        if fee_info is not None:
+            description, fee_text, occurrence_text = fee_info
+            return FeeItem(
+                description=description,
+                source_blocks=[block.block_id],
+                source_text=row_text,
+                fee_text=fee_text,
+                occurrence_text=occurrence_text,
+            )
+        else:
+            # Fallback if no fee info found
+            return FeeItem(
+                description=row_text,
+                source_blocks=[block.block_id],
+                source_text=row_text,
+            )
