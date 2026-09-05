@@ -8,6 +8,10 @@ from src.evidence_manager import EvidenceManager
 from src.logical_block_generator import LogicalBlockGenerator
 from src.fee_candidate_extractor import FeeCandidateExtractor
 from src.fee_section_assembler import FeeSection, FeeSectionAssembler
+from src.evidence_sufficiency_gate import (
+    EvidenceSufficiencyDecision,
+    EvidenceSufficiencyGate,
+)
 from src.validator import Validator
 
 
@@ -19,6 +23,7 @@ class DocumentProcessor:
         self.block_generator = LogicalBlockGenerator()
         self.extractor = FeeCandidateExtractor()
         self.fee_section_assembler = FeeSectionAssembler()
+        self.evidence_gate = EvidenceSufficiencyGate()
         self.validator = Validator()
     
     def process_document(self, physical_rows: List[PhysicalRow]) -> Dict[str, Any]:
@@ -40,6 +45,10 @@ class DocumentProcessor:
         fee_sections = self.fee_section_assembler.assemble(
             self.block_generator.get_all_blocks()
         )
+        evidence_decision = self.evidence_gate.evaluate(
+            self.block_generator.get_all_blocks(),
+            fee_sections,
+        )
 
         # Step 3: Extract legacy fee candidates
         self._extract_fee_candidates()
@@ -49,7 +58,11 @@ class DocumentProcessor:
         validated_blocks = self.validator.validate_all_blocks(all_blocks)
         
         # Step 5: Format output
-        result = self._format_output(validated_blocks, fee_sections)
+        result = self._format_output(
+            validated_blocks,
+            fee_sections,
+            evidence_decision,
+        )
         
         return result
     
@@ -93,6 +106,7 @@ class DocumentProcessor:
         self,
         blocks: List[LogicalDocumentBlock],
         fee_sections: List[FeeSection],
+        evidence_decision: EvidenceSufficiencyDecision,
     ) -> Dict[str, Any]:
         """Format the final output"""
         formatted_blocks = []
@@ -154,6 +168,7 @@ class DocumentProcessor:
         
         return {
             'blocks': formatted_blocks,
+            'evidence_sufficiency': evidence_decision.to_dict(),
             'fee_sections': [
                 {
                     'heading': section.heading,

@@ -92,6 +92,14 @@ class TestLogicalBlockIntegration(unittest.TestCase):
 
         self.assertEqual(result["summary"]["total_fee_sections"], 1)
         self.assertEqual(result["summary"]["total_fee_items"], 2)
+        self.assertEqual(result["evidence_sufficiency"]["decision"], "ESCALATE")
+        self.assertIn(
+            "unresolved_footnote_association",
+            {
+                reason["code"]
+                for reason in result["evidence_sufficiency"]["reasons"]
+            },
+        )
 
         fee_items = result["fee_sections"][0]["fee_items"]
         self.assertEqual(fee_items[0]["description"], "Single Credit Transfer")
