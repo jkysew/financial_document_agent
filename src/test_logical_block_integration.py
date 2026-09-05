@@ -6,7 +6,7 @@ Tests that the new deterministic grouping works correctly
 import json
 import unittest
 from src.document_processor import DocumentProcessor
-from src.models import PhysicalRow
+from src.models import PhysicalRow, VisualSpan
 
 class TestLogicalBlockIntegration(unittest.TestCase):
     """Test the integration of deterministic LogicalBlockGenerator with DocumentProcessor"""
@@ -14,6 +14,99 @@ class TestLogicalBlockIntegration(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         self.processor = DocumentProcessor()
+
+    @staticmethod
+    def make_page6_row(row_index, text, y1, y2, visual_spans=None):
+        return PhysicalRow(
+            page_number=6,
+            coordinates={
+                "x1": 34.0,
+                "y1": y1,
+                "x2": 300.0,
+                "y2": y2,
+            },
+            text=text,
+            words=[],
+            visual_spans=visual_spans or [],
+            row_id=f"page6-row-{row_index}",
+        )
+
+    def test_page6_fee_sections_and_visual_spans_use_processor_path(self):
+        rows = [
+            self.make_page6_row(
+                1,
+                "Single Credit Transfer € 25",
+                0.0,
+                10.0,
+                [
+                    VisualSpan(
+                        text="Single Credit Transfer",
+                        font_family="TestFont",
+                        font_size=9.0,
+                        font_flags=0,
+                        color=0,
+                        bbox={"x0": 34.0, "y0": 0.0, "x1": 180.0, "y1": 10.0},
+                    )
+                ],
+            ),
+            self.make_page6_row(2, "with min. € 5", 15.0, 25.0),
+            self.make_page6_row(3, "max. € 160", 30.0, 40.0),
+            self.make_page6_row(
+                4,
+                'Transfer labelled "Remitter pays all charges" or "OUR"',
+                120.0,
+                130.0,
+            ),
+            self.make_page6_row(
+                5,
+                "Amount of transfer in euro (or exchange value in foreign currency)",
+                135.0,
+                145.0,
+            ),
+            self.make_page6_row(6, "≤12 500 € 8", 150.0, 160.0),
+            self.make_page6_row(7, ">12 500 à ≤ 25 000 € 25", 165.0, 175.0),
+            self.make_page6_row(8, ">25 000 à ≤ 50 000 € 40", 180.0, 190.0),
+            self.make_page6_row(9, ">50 000 ≤ 100 000 € 80", 195.0, 205.0),
+            self.make_page6_row(10, ">100 000 € 100 6", 210.0, 220.0),
+            self.make_page6_row(
+                11,
+                "6 The maximum amount is EUR 25 000 under the applicable law.",
+                300.0,
+                310.0,
+            ),
+            self.make_page6_row(
+                12,
+                "This explanatory footnote continues with another EUR 100 amount.",
+                315.0,
+                325.0,
+            ),
+        ]
+
+        result = self.processor.process_document(rows)
+
+        first_row = result["blocks"][0]["physical_rows"][0]
+        self.assertEqual(
+            first_row["visual_spans"][0]["font_family"],
+            "TestFont",
+        )
+
+        self.assertEqual(result["summary"]["total_fee_sections"], 1)
+        self.assertEqual(result["summary"]["total_fee_items"], 2)
+
+        fee_items = result["fee_sections"][0]["fee_items"]
+        self.assertEqual(fee_items[0]["description"], "Single Credit Transfer")
+        self.assertEqual(
+            fee_items[0]["continuation_text"],
+            ["with min. € 5", "max. € 160"],
+        )
+        self.assertEqual(len(fee_items[1]["tiers"]), 5)
+        self.assertEqual(fee_items[1]["tiers"][0]["fee"], "€ 8")
+
+        self.assertIn("block_000", fee_items[0]["source_blocks"])
+        self.assertIn("Single Credit Transfer", fee_items[0]["source_text"])
+        self.assertNotIn("EUR 25 000", " ".join(
+            item["source_text"] for item in fee_items
+        ))
         
     def test_document_processor_integration_with_real_evidence(self):
         """Test DocumentProcessor with actual evidence from JSON file"""

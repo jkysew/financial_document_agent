@@ -7,6 +7,7 @@ from src.models import LogicalDocumentBlock, PhysicalRow
 from src.evidence_manager import EvidenceManager
 from src.logical_block_generator import LogicalBlockGenerator
 from src.fee_candidate_extractor import FeeCandidateExtractor
+from src.fee_section_assembler import FeeSection, FeeSectionAssembler
 from src.validator import Validator
 
 
@@ -17,6 +18,7 @@ class DocumentProcessor:
         self.evidence_manager = EvidenceManager()
         self.block_generator = LogicalBlockGenerator()
         self.extractor = FeeCandidateExtractor()
+        self.fee_section_assembler = FeeSectionAssembler()
         self.validator = Validator()
     
     def process_document(self, physical_rows: List[PhysicalRow]) -> Dict[str, Any]:
@@ -29,12 +31,17 @@ class DocumentProcessor:
                 coordinates=row.coordinates,
                 text=row.text,
                 words=row.words,
-                row_id=row.row_id
+                row_id=row.row_id,
+                visual_spans=row.visual_spans,
             )
         
         # Step 2: Create logical blocks using deterministic grouping from physical rows
         self.block_generator.create_blocks_from_rows(self.evidence_manager.physical_rows)
-        # Step 3: Extract fee candidates
+        fee_sections = self.fee_section_assembler.assemble(
+            self.block_generator.get_all_blocks()
+        )
+
+        # Step 3: Extract legacy fee candidates
         self._extract_fee_candidates()
         
         # Step 4: Validate results
@@ -42,7 +49,7 @@ class DocumentProcessor:
         validated_blocks = self.validator.validate_all_blocks(all_blocks)
         
         # Step 5: Format output
-        result = self._format_output(validated_blocks)
+        result = self._format_output(validated_blocks, fee_sections)
         
         return result
     
@@ -82,7 +89,11 @@ class DocumentProcessor:
         for block in blocks:
             self.extractor.extract_from_block(block)
     
-    def _format_output(self, blocks: List[LogicalDocumentBlock]) -> Dict[str, Any]:
+    def _format_output(
+        self,
+        blocks: List[LogicalDocumentBlock],
+        fee_sections: List[FeeSection],
+    ) -> Dict[str, Any]:
         """Format the final output"""
         formatted_blocks = []
         
@@ -95,7 +106,18 @@ class DocumentProcessor:
                     'coordinates': row.coordinates,
                     'text': row.text,
                     'words': row.words,
-                    'row_id': row.row_id
+                    'row_id': row.row_id,
+                    'visual_spans': [
+                        {
+                            'text': span.text,
+                            'font_family': span.font_family,
+                            'font_size': span.font_size,
+                            'font_flags': span.font_flags,
+                            'color': span.color,
+                            'bbox': span.bbox,
+                        }
+                        for span in row.visual_spans
+                    ],
                 })
             
             formatted_block = {
@@ -132,8 +154,32 @@ class DocumentProcessor:
         
         return {
             'blocks': formatted_blocks,
+            'fee_sections': [
+                {
+                    'heading': section.heading,
+                    'source_blocks': section.source_blocks,
+                    'fee_items': [
+                        {
+                            'description': item.description,
+                            'source_blocks': item.source_blocks,
+                            'source_text': item.source_text,
+                            'fee_text': item.fee_text,
+                            'occurrence_text': item.occurrence_text,
+                            'continuation_text': item.continuation_text,
+                            'tiers': item.tiers,
+                        }
+                        for item in section.fee_items
+                    ],
+                }
+                for section in fee_sections
+            ],
             'summary': {
                 'total_blocks': len(formatted_blocks),
-                'total_candidates': sum(len(block['fee_candidates']) for block in formatted_blocks)
+                'total_candidates': sum(len(block['fee_candidates']) for block in formatted_blocks),
+                'total_fee_sections': len(fee_sections),
+                'total_fee_items': sum(
+                    len(section.fee_items)
+                    for section in fee_sections
+                ),
             }
         }

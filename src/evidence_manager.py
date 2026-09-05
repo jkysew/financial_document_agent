@@ -16,14 +16,15 @@ class EvidenceManager:
     
     def add_physical_row(self, page_number: int, coordinates: Dict[str, float], 
                         text: str, words: List[Dict[str, Any]],
-                        row_id: str = None):
+                        row_id: str = None, visual_spans: List[Any] = None):
         """Add a physical row to the evidence"""
         row = PhysicalRow(
             page_number=page_number,
             coordinates=coordinates,
             text=text,
             words=words,
-            row_id=row_id
+            row_id=row_id,
+            visual_spans=list(visual_spans or []),
         )
         self.physical_rows.append(row)
     
